@@ -42,7 +42,7 @@ impl ServerState {
 fn kairys_portas(nr: u16) -> u16 {
     BAZINIS_PORTAS + (nr - 1 + SERVERIU_KIEKIS - 1) % SERVERIU_KIEKIS
 }
-fn desiny_portas(nr: u16) -> u16 {
+fn desinys_portas(nr: u16) -> u16 {
     BAZINIS_PORTAS + nr % SERVERIU_KIEKIS
 }
 
@@ -73,18 +73,18 @@ fn main() {
     let serverio_id = format!("S{}", nr);
     let savas_portas = BAZINIS_PORTAS + nr - 1;
     let kairys = kairys_portas(nr);
-    let desiny = desiny_portas(nr);
+    let desinys = desinys_portas(nr);
 
     println!(
         "[{}] portas={} ← S{}({}) | S{}({}) →",
         serverio_id, savas_portas,
         (kairys - BAZINIS_PORTAS + 1), kairys,
-        (desiny - BAZINIS_PORTAS + 1), desiny
+        (desinys - BAZINIS_PORTAS + 1), desinys
     );
 
     let busena = Arc::new(Mutex::new(ServerState::new(serverio_id.clone())));
 
-    for (kryptis, portas) in [("←", kairys), ("→", desiny)] {
+    for (kryptis, portas) in [("<-", kairys), ("->", desinys)] {
         let busena2 = Arc::clone(&busena);
         let sid = serverio_id.clone();
         thread::spawn(move || prijungti_kaimyna(sid, kryptis, portas, busena2));
@@ -193,13 +193,21 @@ fn tvarkyti_klienta(srautas: TcpStream, busena: Arc<Mutex<ServerState>>) {
         if vardas.is_empty() { continue; }
 
         if vardas.starts_with("__SERVER_") {
-            let mut b = busena.lock().unwrap();
-            if !b.vardai.contains(&vardas) {
-                b.vardai.insert(vardas.clone());
-                b.kaimynai.push(Arc::clone(&rasymo_srautas));
+            {
+                let mut isvestis = rasymo_srautas.lock().unwrap();
+                let _ = isvestis.write_all(b"VARDASOK\n");
             }
-            let mut isvestis = rasymo_srautas.lock().unwrap();
-            let _ = isvestis.write_all(b"VARDASOK\n");
+            loop {
+                let mut eilute = String::new();
+                match skaitytuvas.read_line(&mut eilute) {
+                    Ok(0) | Err(_) => break,
+                    _ => {}
+                }
+                let ivesta = eilute.trim().to_string();
+                if !ivesta.is_empty() {
+                    apdoroti_zinute_is_kaimyno(&ivesta, &busena);
+                }
+            }
             return;
         }
 
@@ -284,8 +292,8 @@ fn apdoroti_zinute_is_kaimyno(eilute: &str, busena: &Arc<Mutex<ServerState>>) {
 
     println!("[{}] ← {}", sid, turinys);
 
-    // Vietiniams klientams: siunčiame kaip gauname (su (Si) prefiksu)
-    // Kaimynams: taip pat perduodame toliau
+    // Vietiniams siunciame su prefiksu
+    // Kaimynams perduodame toliau
     let wire = format!("PRANESIMAS {}\n", turinys);
     siusti_visiems(busena, &wire, &wire);
 }
