@@ -6,15 +6,17 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const BAZINIS_PORTAS: u16 = 59001;
-const SERVERIU_KIEKIS: u16 = 6;
-
 struct ServerState {
     id: String,
     vardai: HashSet<String>,
     klientai: Vec<Arc<Mutex<TcpStream>>>,
     kaimynai: Vec<Arc<Mutex<TcpStream>>>,
     matyti: Vec<(String, Instant)>,
+}
+
+struct ServerConfig {
+    base_port: u16,
+    server_count: u16,
 }
 
 impl ServerState {
@@ -39,11 +41,12 @@ impl ServerState {
     }
 }
 
-fn kairys_portas(nr: u16) -> u16 {
-    BAZINIS_PORTAS + (nr - 1 + SERVERIU_KIEKIS - 1) % SERVERIU_KIEKIS
+fn kairys_portas(nr: u16, config: &ServerConfig) -> u16 {
+    config.base_port + (nr - 1 + config.server_count - 1) % config.server_count
 }
-fn desinys_portas(nr: u16) -> u16 {
-    BAZINIS_PORTAS + nr % SERVERIU_KIEKIS
+
+fn desinys_portas(nr: u16, config: &ServerConfig) -> u16 {
+    config.base_port + nr % config.server_count
 }
 
 fn dabar_laikas() -> String {
@@ -59,27 +62,31 @@ fn dabar_laikas() -> String {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Naudojimas: {} <serverio_nr 1-6>", args[0]);
+    if args.len() < 4 {
+        eprintln!("Naudojimas: {} <serverio_nr> <base_port> <server_count>", args[0]);
         std::process::exit(1);
     }
 
     let nr: u16 = args[1].parse().expect("Neteisingas serverio numeris");
-    if nr < 1 || nr > SERVERIU_KIEKIS {
-        eprintln!("Serverio numeris turi būti 1–{}", SERVERIU_KIEKIS);
+    let base_port: u16 = args[2].parse().expect("Neteisingas base port");
+    let server_count: u16 = args[3].parse().expect("Neteisingas server count");
+
+    if nr < 1 || nr > server_count {
+        eprintln!("Serverio numeris turi būti 1–{}", server_count);
         std::process::exit(1);
     }
 
+    let config = ServerConfig { base_port, server_count };
     let serverio_id = format!("S{}", nr);
-    let savas_portas = BAZINIS_PORTAS + nr - 1;
-    let kairys = kairys_portas(nr);
-    let desinys = desinys_portas(nr);
+    let savas_portas = base_port + nr - 1;
+    let kairys = kairys_portas(nr, &config);
+    let desinys = desinys_portas(nr, &config);
 
     println!(
-        "[{}] portas={} ← S{}({}) | S{}({}) →",
+        "[{}] portas={} <- S{}({}) | S{}({}) ->",
         serverio_id, savas_portas,
-        (kairys - BAZINIS_PORTAS + 1), kairys,
-        (desinys - BAZINIS_PORTAS + 1), desinys
+        (kairys - base_port + 1), kairys,
+        (desinys - base_port + 1), desinys
     );
 
     let busena = Arc::new(Mutex::new(ServerState::new(serverio_id.clone())));
@@ -122,7 +129,7 @@ fn prijungti_kaimyna(
     portas: u16,
     busena: Arc<Mutex<ServerState>>,
 ) {
-    let adresas = format!("localhost:{}", portas);
+    let adresas = format!("[::]:{}", portas);
     let srautas = loop {
         match TcpStream::connect(&adresas) {
             Ok(s) => break s,
