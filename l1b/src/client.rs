@@ -1,5 +1,5 @@
 use std::net::TcpStream;
-use std::io::{self, Read, Write};
+use std::io::{self, Write, BufRead, BufReader};
 
 fn main() {
     let host = "::1";
@@ -16,30 +16,24 @@ fn main() {
         }
     };
 
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+
     loop {
         print!("Enter a line to send: ");
-        io::stdout().flush().unwrap();
+        io::stdout()
+            .flush()
+            .unwrap();
 
         let mut input = String::new();
-        io::stdin().read_line(&mut input).expect("Failed to read line");
+        io::stdin().read_line(&mut input)
+            .unwrap();
 
-        stream.write_all(input.as_bytes()).expect("Failed to send data");
+        stream.write_all(input.as_bytes())
+            .unwrap();
 
-        let mut buffer = Vec::new();
-        let mut tmp = [0; 1024];
+        let mut response = String::new();
+        reader.read_line(&mut response).unwrap();
 
-        loop {
-            let n = stream.read(&mut tmp).expect("Failed to receive data");
-            if n == 0 {
-                break;
-            }
-            buffer.extend_from_slice(&tmp[..n]);
-            if tmp[..n].contains(&b'\n') {
-                break;
-            }
-        }
-
-        let received = String::from_utf8_lossy(&buffer);
-        print!("Received: {}", received);
+        print!("Received: {}", response);
     }
 }
