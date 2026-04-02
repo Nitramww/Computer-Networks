@@ -90,7 +90,7 @@ fn main() {
         thread::spawn(move || prijungti_kaimyna(sid, kryptis, portas, busena2));
     }
 
-    let adresas = format!("0.0.0.0:{}", savas_portas);
+    let adresas = format!("[::]:{}", savas_portas);
     let klausytojas = TcpListener::bind(&adresas).expect("Nepavyko sukurti serverio soketo");
 
     for srautas in klausytojas.incoming() {
