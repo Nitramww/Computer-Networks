@@ -1,5 +1,0 @@
-We have 6 servers (same server as in l1c just 6 servers on their own ports) set up in a loop;
-When someone sends a message it gets broadcast to both sides of the loop.
-If the message was sent from the same server as the (some other) client is on it says {name}: {message};
-If the message was sent from a different server it says {(Si)} {name}: {message} where Si is the server identifier (such as S1 for server 1);
-We have to make sure that servers do not create an infinite cycle, so we have to keep the {Timestamp} and {message};

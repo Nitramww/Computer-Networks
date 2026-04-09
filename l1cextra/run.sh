@@ -6,7 +6,6 @@ SERVER_COUNT=6
 BINARY_PATH="./target/release/l1cextra"
 START_DELAY=1.5
 
-# Check if binary exists
 if [ ! -f "$BINARY_PATH" ]; then
   echo "Binary not found at $BINARY_PATH"
   exit 1
@@ -25,7 +24,6 @@ for ((i=1; i<=SERVER_COUNT; i++)); do
   sleep $START_DELAY
 done
 
-# Cleanup function
 cleanup() {
   echo ""
   echo "Stopping all servers..."
