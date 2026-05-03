@@ -1,0 +1,2 @@
+cargo run --bin smtp_client -- --host localhost --port 1025 --subject "Test email" --from testa@test.com --to testb@test.com --file src/message.txt
+cargo run --bin smtp_client -- --host smtp.gmail.com --port 587 --starttls --subject "Test email" --from  --to  --file src/message.txt
