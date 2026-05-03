@@ -114,10 +114,12 @@ fn main() {
 fn siusti_visiems(busena: &Arc<Mutex<ServerState>>, vietinis: &str, kaimynams: &str) {
     let b = busena.lock().unwrap();
     for arc in &b.klientai {
+        // println!("[{}][SIUNTIMAS KLIENTAM]", b.id);
         let mut s = arc.lock().unwrap();
         let _ = s.write_all(vietinis.as_bytes());
     }
     for arc in &b.kaimynai {
+        // println!("[{}][SIUNTIMAS KAIMYNAM]", b.id);
         let mut s = arc.lock().unwrap();
         let _ = s.write_all(kaimynams.as_bytes());
     }
@@ -257,7 +259,6 @@ fn tvarkyti_klienta(srautas: TcpStream, busena: Arc<Mutex<ServerState>>) {
         };
 
         println!("[{}] {}: {}", sid, vardas, ivesta);
-
         // be prefikso
         let vietinis  = format!("PRANESIMAS {} {}: {}\n", timestamp, vardas, ivesta);
         // Kaimynams su prefiksu
@@ -293,15 +294,25 @@ fn apdoroti_zinute_is_kaimyno(eilute: &str, busena: &Arc<Mutex<ServerState>>) {
 
     let sid = {
         let mut b = busena.lock().unwrap();
-        if b.jau_matyta(&raktas) { return; }
+        
+        let mut dalys = raktas.splitn(3, '|');
+        let timestamp = dalys.next().unwrap_or("");
+        let vardas_b = dalys.next().unwrap_or("");
+        let zinute_b = dalys.next().unwrap_or("");
+
+        if b.jau_matyta(&raktas) { 
+            println!("[DUBLIKATAS ({})] {} {}: {}", b.id, timestamp, vardas_b, zinute_b);
+            return;
+        }
         b.id.clone()
     };
 
-    println!("[{}] ← {}", sid, turinys);
+    println!("[{}] <- {}", sid, turinys);
 
     // Vietiniams siunciame su prefiksu
     // Kaimynams perduodame toliau
     let wire = format!("PRANESIMAS {}\n", turinys);
+    println!("[IS ({}) SIUNCIAM KAIMYNAMS]", sid);
     siusti_visiems(busena, &wire, &wire);
 }
 
