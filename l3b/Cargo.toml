@@ -1,0 +1,15 @@
+[package]
+name = "smtp_client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+native-tls = "0.2.18"
+clap = { version = "4", features = ["derive"] }
+dotenvy = "0.15.7"
+base64 = "0.22"
+chrono = "0.4.44"
+
+[[bin]]
+name = "smtp_client"
+path = "src/smtp_client.rs"
