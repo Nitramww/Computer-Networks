@@ -7,6 +7,9 @@ use std::env;
 use chrono::Utc;
 use base64::{engine::general_purpose, Engine as _};
 use clap::Parser;
+use age::{Encryptor, x25519};
+use rand::thread_rng;
+use std::io::Write;
 
 #[derive(Parser, Debug)]
 #[command(name = "smtp-client")]
@@ -36,6 +39,10 @@ struct Args {
     #[arg(long)]
     file: String,
 
+    /// Attachment file paths
+    #[arg(long)]
+    attachments: Vec<String>,
+
     /// Enable debug output
     #[arg(long, default_value_t = false)]
     debug: bool,
@@ -56,6 +63,8 @@ enum SmtpStream {
     Plain(TcpStream),
     Tls(native_tls::TlsStream<TcpStream>),
 }
+
+// prideti zinutes sifravima
 
 /// SMTP Response codes
 #[derive(Debug, PartialEq)]
@@ -143,6 +152,18 @@ impl SmtpResponse {
     pub fn message(&self) -> String {
         self.lines.join("\n")
     }
+}
+
+fn encrypt_part(plaintext: &[u8], recipient_pubkey: &str) -> Vec<u8> {
+    let recipient = recipient_pubkey.parse::<x25519::Recipient>().unwrap();
+    let encryptor = Encryptor::with_recipients(vec![Box::new(recipient)]);
+
+    let mut output = vec![];
+    let mut writer = encryptor.wrap_output(&mut output).unwrap();
+    writer.write_all(plaintext).unwrap();
+    writer.finish().unwrap();
+
+    output
 }
 
 impl SmtpClient {
@@ -466,6 +487,14 @@ impl SmtpClient {
     }
 }
 
+fn wrap_base64(s: &str) -> String {
+    s.as_bytes()
+        .chunks(76)
+        .map(|c| std::str::from_utf8(c).unwrap())
+        .collect::<Vec<_>>()
+        .join("\r\n")
+}
+
 /// Main
 fn main() -> std::io::Result<()> {
     dotenvy::dotenv().ok();
@@ -478,17 +507,55 @@ fn main() -> std::io::Result<()> {
 
     let date = Utc::now().to_rfc2822();
 
-    let message = format!(
-    "From: {}\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\n\r\n{}",
-    args.from,
-    to_header,
-    args.subject,
-    date,
-    body
+    let boundary = "BOUNDARY123456";
+
+    let mut message = format!(
+    "From: {}\r\n\
+    To: {}\r\n\
+    Subject: {}\r\n\
+    Date: {}\r\n\
+    MIME-Version: 1.0\r\n\
+    Content-Type: multipart/mixed; boundary=\"{}\"\r\n\
+    \r\n\
+    --{}\r\n\
+    Content-Type: text/plain; charset=\"utf-8\"\r\n\
+    \r\n\
+    {}\r\n",
+        args.from,
+        to_header,
+        args.subject,
+        date,
+        boundary,
+        boundary,
+        body
     );
 
+    for path in &args.attachments {
+        let file_bytes = std::fs::read(path)?;
+        let encoded = general_purpose::STANDARD.encode(file_bytes);
+        let encoded = wrap_base64(&encoded);
+
+        let filename = std::path::Path::new(path)
+            .file_name()
+            .unwrap()
+            .to_string_lossy();
+
+        message.push_str(&format!(
+        "\r\n--{}\r\n\
+        Content-Type: application/octet-stream\r\n\
+        Content-Disposition: attachment; filename=\"{}\"\r\n\
+        Content-Transfer-Encoding: base64\r\n\
+        \r\n\
+        {}\r\n",
+            boundary,
+            filename,
+            encoded
+        ));
+    }
+
+    message.push_str(&format!("--{}--\r\n", boundary));
+
     let mut client = SmtpClient::connect(&args.host, args.port, &args.host)?;
-    
 
     client.set_debug(args.debug);
 
