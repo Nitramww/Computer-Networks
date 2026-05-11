@@ -1,5 +1,7 @@
 use std::io::{self, BufRead, BufReader, Write};
 use native_tls::{TlsConnector};
+use std::path::Path;
+use walkdir::WalkDir;
 use std::net::TcpStream;
 use std::io::Read;
 use std::time::Duration;
@@ -508,12 +510,16 @@ fn wrap_base64(s: &str) -> String {
         .join("\r\n")
 }
 
+fn get_mime_type(path: &Path) -> String {
+    mime_guess::from_path(path)
+        .first_or_octet_stream()
+        .to_string()
+}
+
 /// Main
 fn main() -> std::io::Result<()> {
     dotenvy::dotenv().ok();
-
     let args = Args::parse();
-
     let body_raw = std::fs::read(&args.file)?;
     let (body_content_type, body_part) = if args.encrypt {
         let pubkey = env::var("AGE_RECIPIENT")
@@ -528,13 +534,9 @@ fn main() -> std::io::Result<()> {
         })?;
         ("text/plain; charset=utf-8".to_string(), text)
     };
-
     let to_header = args.to.join(", ");
-
     let date = Utc::now().to_rfc2822();
-
     let boundary = "BOUNDARY123456";
-
     let mut message = format!(
     "From: {}\r\n\
     To: {}\r\n\
@@ -544,6 +546,7 @@ fn main() -> std::io::Result<()> {
     Content-Type: multipart/mixed; boundary=\"{}\"\r\n\
     \r\n\
     --{}\r\n\
+    Content-Type: {}\r\n\
     \r\n\
     {}\r\n",
     args.from,
@@ -552,33 +555,52 @@ fn main() -> std::io::Result<()> {
     date,
     boundary,
     boundary,
+    body_content_type,
     body_part,
     );
-
+    
     for path in &args.attachments {
-        let file_bytes = std::fs::read(path)?;
-        let encoded = general_purpose::STANDARD.encode(file_bytes);
-        let encoded = wrap_base64(&encoded);
-
-        let filename = std::path::Path::new(path)
-            .file_name()
-            .unwrap()
-            .to_string_lossy();
-
-        message.push_str(&format!(
-            "\r\n--{}\r\n\
-            Content-Type: application/octet-stream\r\n\
-            Content-Disposition: attachment; filename=\"{}\"\r\n\
-            Content-Transfer-Encoding: base64\r\n\
-            \r\n\
-            {}\r\n",
-            boundary,
-            filename,
-            encoded
-        ));
+        let path = Path::new(path);
+        
+        let files_to_attach: Vec<_> = if path.is_dir() {
+            WalkDir::new(path)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_file())
+                .map(|e| e.path().to_path_buf())
+                .collect()
+        } else {
+            vec![path.to_path_buf()]
+        };
+        
+        for file_path in files_to_attach {
+            let file_bytes = std::fs::read(&file_path)?;
+            let encoded = general_purpose::STANDARD.encode(file_bytes);
+            let encoded = wrap_base64(&encoded);
+            
+            let filename = file_path
+                .file_name()
+                .unwrap()
+                .to_string_lossy();
+            
+            let mime_type = get_mime_type(&file_path);
+            
+            message.push_str(&format!(
+                "\r\n--{}\r\n\
+                Content-Type: {}\r\n\
+                Content-Disposition: attachment; filename=\"{}\"\r\n\
+                Content-Transfer-Encoding: base64\r\n\
+                \r\n\
+                {}",
+                boundary,
+                mime_type,
+                filename,
+                encoded
+            ));
+        }
     }
 
-    message.push_str(&format!("--{}--\r\n", boundary));
+    message.push_str(&format!("\r\n--{}\r\n", boundary));
 
     let mut client = SmtpClient::connect(&args.host, args.port, &args.host)?;
 
