@@ -8,8 +8,6 @@ use chrono::Utc;
 use base64::{engine::general_purpose, Engine as _};
 use clap::Parser;
 use age::{Encryptor, x25519};
-use rand::thread_rng;
-use std::io::Write;
 
 #[derive(Parser, Debug)]
 #[command(name = "smtp-client")]
@@ -46,6 +44,10 @@ struct Args {
     /// Enable debug output
     #[arg(long, default_value_t = false)]
     debug: bool,
+
+    /// Encrypt the message body using age (requires AGE_RECIPIENT env var)
+    #[arg(long, default_value_t = false)]
+    encrypt: bool,
 
     /// Use STARTTLS
     #[arg(long, default_value_t = false)]
@@ -156,7 +158,9 @@ impl SmtpResponse {
 
 fn encrypt_part(plaintext: &[u8], recipient_pubkey: &str) -> Vec<u8> {
     let recipient = recipient_pubkey.parse::<x25519::Recipient>().unwrap();
-    let encryptor = Encryptor::with_recipients(vec![Box::new(recipient)]);
+    let encryptor = Encryptor::with_recipients(
+        std::iter::once(&recipient as &dyn age::Recipient)
+    ).unwrap();
 
     let mut output = vec![];
     let mut writer = encryptor.wrap_output(&mut output).unwrap();
@@ -164,6 +168,15 @@ fn encrypt_part(plaintext: &[u8], recipient_pubkey: &str) -> Vec<u8> {
     writer.finish().unwrap();
 
     output
+}
+
+const ENCRYPTION_HEADER: &str = "====ENCRYPTED====";
+const ENCRYPTION_FOOTER: &str = "====END ENCRYPTED====";
+
+fn encrypt_body(plaintext: &[u8], recipient_pubkey: &str) -> String {
+    let ciphertext = encrypt_part(plaintext, recipient_pubkey);
+    let encoded = wrap_base64(&general_purpose::STANDARD.encode(&ciphertext));
+    format!("{}\r\n{}\r\n{}", ENCRYPTION_HEADER, encoded, ENCRYPTION_FOOTER)
 }
 
 impl SmtpClient {
@@ -501,7 +514,20 @@ fn main() -> std::io::Result<()> {
 
     let args = Args::parse();
 
-    let body = std::fs::read_to_string(&args.file)?;
+    let body_raw = std::fs::read(&args.file)?;
+    let (body_content_type, body_part) = if args.encrypt {
+        let pubkey = env::var("AGE_RECIPIENT")
+            .map_err(|_| io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "AGE_RECIPIENT env var must be set when using --encrypt",
+            ))?;
+        ("text/plain; charset=utf-8".to_string(), encrypt_body(&body_raw, &pubkey))
+    } else {
+        let text = String::from_utf8(body_raw).map_err(|e| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("Body file is not valid UTF-8: {}", e))
+        })?;
+        ("text/plain; charset=utf-8".to_string(), text)
+    };
 
     let to_header = args.to.join(", ");
 
@@ -518,16 +544,15 @@ fn main() -> std::io::Result<()> {
     Content-Type: multipart/mixed; boundary=\"{}\"\r\n\
     \r\n\
     --{}\r\n\
-    Content-Type: text/plain; charset=\"utf-8\"\r\n\
     \r\n\
     {}\r\n",
-        args.from,
-        to_header,
-        args.subject,
-        date,
-        boundary,
-        boundary,
-        body
+    args.from,
+    to_header,
+    args.subject,
+    date,
+    boundary,
+    boundary,
+    body_part,
     );
 
     for path in &args.attachments {
@@ -541,12 +566,12 @@ fn main() -> std::io::Result<()> {
             .to_string_lossy();
 
         message.push_str(&format!(
-        "\r\n--{}\r\n\
-        Content-Type: application/octet-stream\r\n\
-        Content-Disposition: attachment; filename=\"{}\"\r\n\
-        Content-Transfer-Encoding: base64\r\n\
-        \r\n\
-        {}\r\n",
+            "\r\n--{}\r\n\
+            Content-Type: application/octet-stream\r\n\
+            Content-Disposition: attachment; filename=\"{}\"\r\n\
+            Content-Transfer-Encoding: base64\r\n\
+            \r\n\
+            {}\r\n",
             boundary,
             filename,
             encoded

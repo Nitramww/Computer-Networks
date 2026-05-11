@@ -9,6 +9,8 @@ clap = { version = "4", features = ["derive"] }
 dotenvy = "0.15.7"
 base64 = "0.22"
 chrono = "0.4.44"
+rand = "0.10.1"
+age = "0.11.3"
 
 [[bin]]
 name = "smtp_client"
