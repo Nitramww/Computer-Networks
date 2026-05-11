@@ -172,13 +172,26 @@ fn encrypt_part(plaintext: &[u8], recipient_pubkey: &str) -> Vec<u8> {
     output
 }
 
-const ENCRYPTION_HEADER: &str = "====ENCRYPTED====";
-const ENCRYPTION_FOOTER: &str = "====END ENCRYPTED====";
-
 fn encrypt_body(plaintext: &[u8], recipient_pubkey: &str) -> String {
     let ciphertext = encrypt_part(plaintext, recipient_pubkey);
-    let encoded = wrap_base64(&general_purpose::STANDARD.encode(&ciphertext));
-    format!("{}\r\n{}\r\n{}", ENCRYPTION_HEADER, encoded, ENCRYPTION_FOOTER)
+
+    let b64 = general_purpose::STANDARD.encode(ciphertext);
+
+    let wrapped = wrap_base64(&b64);
+
+    format_encrypted_block(&wrapped)
+}
+
+fn format_encrypted_block(b64_body: &str) -> String {
+    format!(
+        "====ENCRYPTED MESSAGE====\r\n\
+Content-Type: application/age\r\n\
+Content-Transfer-Encoding: base64\r\n\
+\r\n\
+{}\r\n\
+====END ENCRYPTED MESSAGE====\r\n",
+        b64_body
+    )
 }
 
 impl SmtpClient {
@@ -527,12 +540,18 @@ fn main() -> std::io::Result<()> {
                 io::ErrorKind::InvalidInput,
                 "AGE_RECIPIENT env var must be set when using --encrypt",
             ))?;
-        ("text/plain; charset=utf-8".to_string(), encrypt_body(&body_raw, &pubkey))
+
+        (
+            "application/age".to_string(),
+            encrypt_body(&body_raw, &pubkey),
+        )
     } else {
-        let text = String::from_utf8(body_raw).map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidData, format!("Body file is not valid UTF-8: {}", e))
-        })?;
-        ("text/plain; charset=utf-8".to_string(), text)
+        (
+            "text/plain; charset=utf-8".to_string(),
+            String::from_utf8(body_raw).map_err(|e| {
+                io::Error::new(io::ErrorKind::InvalidData, e)
+            })?,
+        )
     };
     let to_header = args.to.join(", ");
     let date = Utc::now().to_rfc2822();
